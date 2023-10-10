@@ -43,6 +43,7 @@ class InterestCalculator:
                 print('Based on Information, I can Calculate the following:')
                 for item in valid_calculations:
                     print(f'{i}: {item}')
+                    i += 1
                 print(f'0: Return')
                 calc_selected = int(input('\nWhich calculation would you like?: '))
                 if calc_selected:
@@ -83,7 +84,7 @@ class InterestCalculator:
 
         elif option == '4':
             ################################################################################################
-            cf = [] # Manually add Cash Flow here
+            cf = [-800000.0, 24000.0, 24000.0, 24000.0, 24000.0, 24000.0, 24000.0, 24000.0, 24000.0, 24000.0, 1024000.0] # Manually add Cash Flow here
             if cf:
                 print(f'Entering: {cf}')
                 self.value_dict["Cashflow"] = cf
@@ -154,7 +155,6 @@ class InterestCalculator:
 if __name__ == '__main__':
     x = InterestCalculator()
     x.get_info()
-
 
 
 

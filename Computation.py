@@ -2,7 +2,7 @@
 
 import math
 import copy
-import sympy as sp
+from scipy.optimize import newton
 
 
 def format_numeric_value(value):
@@ -15,24 +15,34 @@ def format_numeric_value(value):
 class OutlineCalculation:
     def __init__(self, values:dict):
         self.calc = "Outline"
-        self.values = copy.copy(values)
+        self.values = copy.deepcopy(values)
         self.missing_values = []
         self.valid = False
+        self.attempt_calc_failed = False
 
     def validate_values(self):
         required_items = possible_calculation.get(self.calc, [])
         valid = True
         for item in required_items:
             if item not in self.values:
+                if self.attempt_calc_failed:
+                    print("ERROR, This item is missing:", item)
+                    print("This is what entered:", self.values)
                 self.missing_values.append(item)
                 valid = False
         return valid
+
+    def calculate(self):
+        if not self.valid:
+            self.attempt_calc_failed = True
+            return
 
     def display_values(self):
         if not self.valid:
             for item in self.missing_values:
                 print(f"Missing data for '{item}'.")
             return
+
 
 
 class FutureValue(OutlineCalculation):
@@ -48,8 +58,7 @@ class FutureValue(OutlineCalculation):
             self.custom = self.values.get("Custom", None)
 
     def calculate(self):
-        if not self.valid:
-            return
+        super().calculate()
 
         if self.compound == "Annual":
             return self.PV * (1 + self.rate) ** self.periods
@@ -87,6 +96,8 @@ class PresentValue(OutlineCalculation):
             self.custom = self.values.get("Custom", None)
 
     def calculate(self):
+        super().calculate()
+
         if self.compound == "Annual":
             return self.FV / (1 + self.rate) ** self.periods
         elif self.compound == "Semi-Annual":
@@ -123,12 +134,17 @@ class CashflowValue(OutlineCalculation):
             self.custom = self.values.get("Custom", None)
 
     def calculate(self):
+        super().calculate()
+
         i = 0
         present_accumulative = 0
         for cash in self.cf_list:
-            self.values["Present Value"] = cash
+            self.values["Future Value"] = cash
             self.values["Periods"] = self.starting + i
-            present_accumulative += PresentValue(self.values)
+            try:
+                present_accumulative += PresentValue(self.values).calculate()
+            except Exception:
+                print(self.values)
             i += 1
         return str(format_numeric_value(present_accumulative)) + " in Present Value"
 
@@ -152,22 +168,15 @@ class InternalRate(OutlineCalculation):
             self.starting = self.values["Start Year"]
 
     def calculate(self):
-        starting_point = self.values['Start Year']
-        c = sp.symbols('c')
-        equation = sum(coeff * c ** (i + starting_point)
-                       for i, coeff in enumerate(self.values['Cashflow']))
-        roots = sp.solve(equation, c)
-        real_roots = [root.evalf() for root in roots if root.is_real]
-        answer = []
-        for c in real_roots:
-            answer.append((1/c) - 1)
+        super().calculate()
 
-        if len(answer) == 1:
-            return answer[0]
-        else:
-            for rate in answer:
-                print(f'Rate: {rate}')
-            return "above"
+        def calculate_irr(rate):
+            return sum([cf / ((1 + rate) ** (year + self.values["Start Year"]))
+                        for year, cf in enumerate(self.values['Cashflow'])])
+        answer = newton(calculate_irr, 0.10)
+        print(f'The Rate in Percentage rounded to 2 decimal places is {round(answer * 100, 2)}%')
+        return str(answer) + f' or {round(answer * 100, 2)}%'
+
 
     def display_values(self):
         super().display_values()
