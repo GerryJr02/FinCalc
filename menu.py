@@ -17,11 +17,17 @@ rates_dict = {
     0: ("Return", "return")
 }
 
+bonds_dict = {
+    1: ("Principal", "commas"),
+    2: ("Payments", "commas"),
+    0: ("Return", "return")
+}
+
 
 menu_layout = {
     1: ("Value", values_dict),  # Present Value, Future Value, Cashflow
     2: ("Rate", rates_dict),   # Interest Rate, Effective Rate, Nominal Rate
-    3: ("Bond", "Not Ready"),
+    3: ("Bond/Loan", bonds_dict),
     0: "Complete"
 }
 

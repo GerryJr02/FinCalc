@@ -230,6 +230,86 @@ class NominalRate(OutlineCalculation):
         print(f'Compound Method: {format_numeric_value(self.compound)}')
 
 
+class PaymentLoan(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "Payments for Loan"
+        self.requirements = ["Principal", "Periods", "Rate", "Compound Method"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.p = self.values["Principal"]
+            self.periods = self.values["Periods"]
+            self.rate = self.values["Rate"]
+            self.compound = self.values["Compound Method"]
+
+    def calculate(self):
+        super().calculate()
+        compounding = compounding_methods[self.compound]
+        r = self.rate / compounding
+        n = compounding * self.periods
+        return (r * (1 + r)**n * self.p) / ((1 + r)**n - 1)
+
+
+    def display_values(self):
+        super().display_values()
+        bold_name = "\033[1m" + "Calculating Payments Needed For Loan" + "\033[0m"
+        print(f'{bold_name:~^50}')
+        print(f'Principal: {format_numeric_value(self.p)}')
+        print(f'Interest Rate: {self.rate * 100}%')
+        print(f'Periods: {format_numeric_value(self.periods)}')
+        print(f'Compound Method: {format_numeric_value(self.compound)}')
+
+
+class PerpetualValue(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "Perpetual Value"
+        self.requirements = ["Perpetual Value", "Rate"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.prp = self.values["Perpetual Value"]
+            self.rate = self.values["Rate"]
+
+    def calculate(self):
+        super().calculate()
+        return str(self.prp / self.rate) + " in Present Value"
+
+
+    def display_values(self):
+        super().display_values()
+        bold_name = "\033[1m" + "Calculating Perpetual Value in Present Value" + "\033[0m"
+        print(f'{bold_name:~^50}')
+        print(f'Perpetual Value Annually: {format_numeric_value(self.prp)}')
+        print(f'Interest Rate: {self.rate * 100}%')
+
+
+class PrincipalRemaining(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "Principal Remaining"
+        self.requirements = ["Payments", "Periods", "Rate", "Compound Method"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.pay = self.values["Payments"]
+            self.periods = self.values["Periods"]
+            self.rate = self.values["Rate"]
+            self.compound = self.values["Compound Method"]
+
+    def calculate(self):
+        super().calculate()
+        compounding = compounding_methods[self.compound]
+        r = self.rate / compounding
+        n = compounding * self.periods
+        return (self.pay / r) * (1 - 1/((1+r)**n))
+
+    def display_values(self):
+        super().display_values()
+        bold_name = "\033[1m" + "Calculating Remaining Principal" + "\033[0m"
+        print(f'{bold_name:~^50}')
+        print(f'Payments: {format_numeric_value(self.pay)}')
+        print(f'Interest Rate: {self.rate * 100}%')
+        print(f'Periods: {format_numeric_value(self.periods)}')
+        print(f'Compound Method: {format_numeric_value(self.compound)}')
 
 
 calculation_key = {
@@ -237,5 +317,8 @@ calculation_key = {
     "Present Value": PresentValue,
     "Cashflow": CashflowValue,
     "Internal Rate": InternalRate,
-    "Nominal Rate": NominalRate
+    "Nominal Rate": NominalRate,
+    "Payments for Loan": PaymentLoan,
+    "Principal Remaining": PrincipalRemaining,
+    "Perpetual Value": PerpetualValue
 }
