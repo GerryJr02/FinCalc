@@ -5,6 +5,16 @@ import copy
 from scipy.optimize import newton
 
 
+compounding_methods = {
+    'Annual': 1,
+    'Semi-Annual': 2,
+    'Quarterly': 4,
+    'Monthly': 12,
+    'Continuous': 'Continuous',
+    'Custom': 0,
+}
+
+
 def format_numeric_value(value):
     try:
         return f"{float(value):,}" if value != "" else ""
@@ -15,15 +25,15 @@ def format_numeric_value(value):
 class OutlineCalculation:
     def __init__(self, values:dict):
         self.calc = "Outline"
+        self.requirements = []
         self.values = copy.deepcopy(values)
         self.missing_values = []
         self.valid = False
         self.attempt_calc_failed = False
 
     def validate_values(self):
-        required_items = possible_calculation.get(self.calc, [])
         valid = True
-        for item in required_items:
+        for item in self.requirements:
             if item not in self.values:
                 if self.attempt_calc_failed:
                     print("ERROR, This item is missing:", item)
@@ -44,11 +54,11 @@ class OutlineCalculation:
             return
 
 
-
 class FutureValue(OutlineCalculation):
     def __init__(self, values:dict):
         super().__init__(values)
         self.calc = "Future Value"
+        self.requirements = ["Present Value", "Rate", "Periods", "Compound Method"]
         self.valid = self.validate_values()
         if self.valid:
             self.PV = self.values["Present Value"]
@@ -87,6 +97,7 @@ class PresentValue(OutlineCalculation):
     def __init__(self, values:dict):
         super().__init__(values)
         self.calc = "Present Value"
+        self.requirements = ["Future Value", "Rate", "Periods", "Compound Method"]
         self.valid = self.validate_values()
         if self.valid:
             self.FV = self.values["Future Value"]
@@ -125,6 +136,7 @@ class CashflowValue(OutlineCalculation):
     def __init__(self, values:dict):
         super().__init__(values)
         self.calc = "Cashflow"
+        self.requirements = ["Cashflow", "Rate", "Start Year", "Compound Method"]
         self.valid = self.validate_values()
         if self.valid:
             self.cf_list = self.values["Cashflow"]
@@ -162,6 +174,7 @@ class InternalRate(OutlineCalculation):
     def __init__(self, values:dict):
         super().__init__(values)
         self.calc = "Internal Rate"
+        self.requirements = ["Cashflow", "Start Year"]
         self.valid = self.validate_values()
         if self.valid:
             self.cf_list = self.values["Cashflow"]
@@ -186,16 +199,43 @@ class InternalRate(OutlineCalculation):
         print(f'Starting Year: {format_numeric_value(self.starting)}')
 
 
-possible_calculation = {
-    "Future Value": ["Present Value", "Rate", "Periods", "Compound Method"],
-    "Present Value": ["Future Value", "Rate", "Periods", "Compound Method"],
-    "Cashflow": ["Cashflow", "Rate", "Start Year", "Compound Method"],
-    "Internal Rate": ["Cashflow"]
-}
+class NominalRate(OutlineCalculation):
+    def __init__(self, values:dict):
+        super().__init__(values)
+        self.calc = "Nominal Rate"
+        self.requirements = ["Effective Rate", "Compound Method"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.ER = self.values["Effective Rate"]
+            self.compound = self.values["Compound Method"]
 
-calculation_class_key = {
+    def calculate(self):
+        super().calculate()
+        compounding = compounding_methods[self.compound]
+        if compounding != "Continuous":
+            def equation(rate):
+                return (1 + (rate / compounding))**compounding - 1 - self.ER
+            r = newton(equation, 0.10)
+        else:
+            r = math.log(self.ER + 1)
+
+        return r
+
+
+    def display_values(self):
+        super().display_values()
+        bold_name = "\033[1m" + "Calculating Nominal Annual Rate" + "\033[0m"
+        print(f'{bold_name:~^50}')
+        print(f'Effective Rate: {self.ER * 100}%')
+        print(f'Compound Method: {format_numeric_value(self.compound)}')
+
+
+
+
+calculation_key = {
     "Future Value": FutureValue,
     "Present Value": PresentValue,
     "Cashflow": CashflowValue,
-    "Internal Rate": InternalRate
+    "Internal Rate": InternalRate,
+    "Nominal Rate": NominalRate
 }
