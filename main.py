@@ -2,6 +2,7 @@
 from Computation import *
 from menu import enter_value
 
+
 class InterestCalculator:
     def __init__(self):
         self.value_dict = {}
@@ -10,11 +11,15 @@ class InterestCalculator:
     def run(self):
         next_calc = 'Y'
         while next_calc.strip().upper() != 'N' or next_calc.strip() != '0':
-            try:
+            on = False
+            if on:
+                try:
+                    chosen_calc = enter_value(self.value_dict)
+                except Exception as e:
+                    print('Here\'s your hint:', e)
+                    chosen_calc = ''
+            else:
                 chosen_calc = enter_value(self.value_dict)
-            except Exception as e:
-                print('Here\' your hint:', e)
-                chosen_calc = ''
 
             if chosen_calc:  # Calculation Identified
                 calc = calculation_key[chosen_calc](self.value_dict)  # find Calc Class

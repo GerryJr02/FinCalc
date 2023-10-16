@@ -1,37 +1,4 @@
-from Computation import *
-
-
-values_dict = {
-    1: ("Present Value", "commas"),  #  Commas Allowed
-    2: ("Future Value", "commas"),
-    3: ("Cashflow", "cf"),           #  Cashflow Entry is Unique
-    0: ("Return", "return")
-}
-
-
-rates_dict = {
-    1: ("Interest Rate", "percent", "Rate"),   #  Percentage Entry,
-    2: ("Effective Rate", "percent"),
-    3: ("Nominal Rate", "percent"),
-    4: ("Periods", "commas"),
-    0: ("Return", "return")
-}
-
-bonds_dict = {
-    1: ("Principal", "commas"),
-    2: ("Payments", "commas"),
-    0: ("Return", "return")
-}
-
-
-menu_layout = {
-    1: ("Value", values_dict),  # Present Value, Future Value, Cashflow
-    2: ("Rate", rates_dict),   # Interest Rate, Effective Rate, Nominal Rate
-    3: ("Bond/Loan", bonds_dict),
-    0: "Complete"
-}
-
-sub_dicts = [values_dict, rates_dict]
+from Computation import menu_layout, ingredients_catalog, calculation_key
 
 
 def format_val(value):
@@ -80,11 +47,7 @@ def enter_value(value_dict) -> (None, str):
         value_dict[entry[0]] = float(input(f'Enter {entry[0]} {disc}: ').strip().replace(",", ""))
     elif entry_type == "percent":
         disc = "(as a Percent)"
-        if len(entry) > 2:
-            if entry[2] == "Rate":
-                value_dict[entry[2]] = float(input(f'Enter {entry[0]} {disc}: ').strip()) / 100
-        else:
-            value_dict[entry[0]] = float(input(f'Enter {entry[0]} {disc}: ').strip()) / 100
+        value_dict[entry[0]] = float(input(f'Enter {entry[0]} {disc}: ').strip()) / 100
         value_dict['Compound Method'] = enter_compound_method()
     elif entry_type == "cf":
         value_dict[entry[0]] = enter_cashflow()
