@@ -11,7 +11,7 @@ class InterestCalculator:
     def run(self):
         next_calc = 'Y'
         while next_calc.strip().upper() != 'N' or next_calc.strip() != '0':
-            on = False
+            on = True
             if on:
                 try:
                     chosen_calc = enter_value(self.value_dict)
@@ -25,6 +25,7 @@ class InterestCalculator:
                 calc = calculation_key[chosen_calc](self.value_dict)  # find Calc Class
                 if all(key in self.value_dict for key in calc.requirements):  # double check reqs
                     print('\n' * 40)
+
                     calc.display_values()
                     complete = input('Would you like to calculate? (Y/N): ')
                     if complete.strip().upper() == 'Y' or complete.strip() == '1':

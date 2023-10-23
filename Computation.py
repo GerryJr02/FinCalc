@@ -20,10 +20,20 @@ rates_dict = {
     0: ("Return", "return")
 }
 
-bonds_dict = {
+loans_dict = {
     1: ("Principal", "commas"),
     2: ("Payments", "commas"),
     3: ("Perpetual Value", "commas"),
+    0: ("Return", "return")
+}
+
+bonds_dict = {
+    1: ("Face Value", "commas"),
+    2: ("Coupons", "commas"),
+    3: ("Yield", "percent"),
+    4: ("Coupons per Period", "commas"),
+    5: ("Periods", "commas"),
+    6: ("Bond Price", "commas"),
     0: ("Return", "return")
 }
 
@@ -34,7 +44,8 @@ extra_format_storage = {
 menu_layout = {
     1: ("Value", values_dict),  # Present Value, Future Value, Cashflow
     2: ("Rate", rates_dict),   # Interest Rate, Effective Rate, Nominal Rate
-    3: ("Bond/Loan", bonds_dict),
+    3: ("Loan", loans_dict),
+    4: ("Bond", bonds_dict),
     0: "Complete"
 }
 
@@ -97,7 +108,7 @@ class OutlineCalculation:
         bold_name = "\033[1m" + f"Calculating {self.title}" + "\033[0m"
         print(f'{bold_name:~^40}')
         for item in self.values:
-            if item in ingredients_catalog:
+            if item in ingredients_catalog and item in self.requirements:
                 if ingredients_catalog[item] == "commas":
                     print(f'{item}: {format_numeric_value(self.values[item])}')
                 elif ingredients_catalog[item] == "percent":
@@ -106,6 +117,8 @@ class OutlineCalculation:
                     print(f'{item}: {self.values[item]}')
                 else:
                     print(f'Failed to file-- {item}: {self.values[item]}')
+            elif item in ingredients_catalog:
+                pass
             else:
                 print(f"Uncatalogued-- {item}: {self.values[item]}")
 
@@ -132,7 +145,6 @@ class FutureValue(OutlineCalculation):
             return self.PV * math.e ** (self.rate * self.periods)
         elif self.compound == "Custom":
             return self.PV * (1 + self.rate/self.custom) ** (self.periods * self.custom)
-
 
 
 class PresentValue(OutlineCalculation):
@@ -297,7 +309,124 @@ class PrincipalRemaining(OutlineCalculation):
         compounding = compounding_methods[self.compound]
         r = self.rate / compounding
         n = compounding * self.periods
-        return (self.pay / r) * (1 - 1/((1+r)**n))
+        return (self.pay / r) * (1 - 1 / ((1+r) ** n))
+
+#  principal remaining seems off
+#  add feature to find principal remaining w/o Payments since can be calculated without
+#  separate calc into more modules to clean code
+
+class BondPrice(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "Bond Price"
+        self.title = "Bond Price in Present Value"
+        self.requirements = ["Face Value", "Coupons", "Coupons per Period", "Yield",
+                             "Periods"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.fv = self.values["Face Value"]
+            self.coup = self.values["Coupons"]
+            self.m = self.values["Coupons per Period"]
+            self.y = self.values["Yield"]
+            self.periods = self.values["Periods"]
+
+    def calculate(self):
+        super().calculate()
+        n = self.m * self.periods
+        if self.m <= 10000:
+            present_value_fv = self.fv / ((1 + (self.y / self.m )) ** n)
+            present_value_coup = (self.coup / self.y) * (1 - (1 / (1 + (self.y / self.m )) ** n))
+            return present_value_fv + present_value_coup
+        else:
+            fract_1 = 1 / (math.e ** (self.y * self.periods))
+            fract_2 = self.fv + ((self.coup / self.y) * (math.e ** (self.y * self.periods) - 1))
+            return fract_1 * fract_2
+
+
+class YieldToMaturity(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "Yield To Maturity"
+        self.title = "Finding Yield To Maturity in Percent"
+        self.requirements = ["Face Value", "Coupons", "Coupons per Period", "Bond Price",
+                             "Periods"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.fv = self.values["Face Value"]
+            self.coup = self.values["Coupons"]
+            self.m = self.values["Coupons per Period"]
+            self.bp = self.values["Bond Price"]
+            self.periods = self.values["Periods"]
+
+    def calculate(self):
+        super().calculate()
+        ytm = .1  # initial ytm guess before bisect alg
+        lower_bound = -1
+        upper_bound = 1
+        tolerance = 0.000001
+        for i in range(100):
+            self.values["Yield"] = ytm
+            guessed_bond_price = BondPrice(self.values).calculate()
+            if abs(guessed_bond_price - self.bp) > tolerance:
+                if guessed_bond_price < self.bp:
+                    upper_bound = ytm
+                    ytm = (ytm + lower_bound) / 2
+                elif guessed_bond_price > self.bp:
+                    lower_bound = ytm
+                    ytm = (ytm + upper_bound) / 2
+            else:
+                return f"{ytm * 100}%"
+        else:
+            return "Outside of Upper and Lower Bounds"
+
+
+class MacaulayDuration(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "Macaulay Duration"
+        self.title = "Macaulay Duration aka How Many Payments/Periods Left"
+        self.requirements = ["Face Value", "Coupons", "Coupons per Period", "Yield",
+                             "Periods"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.fv = self.values["Face Value"]
+            self.coup = self.values["Coupons"]  # Called % Coupon Bonds or % Bond
+            self.m = self.values["Coupons per Period"]
+            self.y = self.values["Yield"]  # Yield or Bond Yielding %
+            self.periods = self.values["Periods"]
+
+    def calculate(self):
+        super().calculate()
+        n = self.m * self.periods
+        c = (self.coup / self.fv) / self.m
+        y = self.y / self.m
+        fract_1 = (1 + y) / (self.m * y)
+        fract_2 = (1 + y + n * (c - y)) / (self.m * c * ((1 + y) ** n - 1) + self.m * y)
+        return fract_1 - fract_2
+
+
+class ModifiedDuration(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "Modified Duration"
+        self.title = "Modified Duration also known as Sensitivity"
+        self.requirements = ["Face Value", "Coupons", "Coupons per Period", "Yield",
+                             "Periods"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.fv = self.values["Face Value"]
+            self.coup = self.values["Coupons"]  # Called % Coupon Bonds or % Bond
+            self.m = self.values["Coupons per Period"]
+            self.y = self.values["Yield"]  # Yield or Bond Yielding %
+            self.periods = self.values["Periods"]
+
+    def calculate(self):
+        super().calculate()
+        P = BondPrice(self.values).calculate()
+        D = MacaulayDuration(self.values).calculate()
+        answer = (1 / (1 + self.y / self.m)) * D
+        return str(answer) + f" or {answer:.2f} payments aka periods left."
+
 
 
 calculation_key = {
@@ -308,5 +437,9 @@ calculation_key = {
     "Nominal Rate": NominalRate,
     "Payments for Loan": PaymentLoan,
     "Principal Remaining": PrincipalRemaining,
-    "Perpetual Value": PerpetualValue
+    "Perpetual Value": PerpetualValue,
+    "Bond Price": BondPrice,   # Slightly off by .3%                    P and lamda should be switchable
+    "Macaulay Duration": MacaulayDuration,   # Slightly off by 1%
+    "Modified Duration": ModifiedDuration,
+    "Yield To Maturity": YieldToMaturity
 }
