@@ -1,4 +1,4 @@
-from Computation import menu_layout, ingredients_catalog, calculation_key
+from Computation import menu_layout, calculation_key, OutlineCalculation
 
 
 def format_val(value):
@@ -7,15 +7,14 @@ def format_val(value):
     except Exception:
         return value
 
+
 def display_current_info(current_dict):
     if current_dict:
         bold_name = "\033[1m" + "Current Information" + "\033[0m"
         print(f'{bold_name:~^50}')
-        i = 1
-
-        for key, value in current_dict.items():
-            print(f'{i}: {key:<20}{format_val(value)}')
-            i += 1
+        OC = OutlineCalculation(current_dict)
+        OC.valid = True
+        OC.display_values("No Title")
         print()
 
 
@@ -45,16 +44,21 @@ def enter_value(value_dict) -> (None, str):
     if entry_type == "commas":
         disc = "(commas allowed)"  # Disclaimer for Entry
         value_dict[entry[0]] = float(input(f'Enter {entry[0]} {disc}: ').strip().replace(",", ""))
-    elif entry_type == "percent":
+    elif entry_type == "percent" or entry_type == "percent only":
         disc = "(as a Percent)"
         value_dict[entry[0]] = float(input(f'Enter {entry[0]} {disc}: ').strip()) / 100
-        value_dict['Compound Method'] = enter_compound_method()
+        if entry_type == "percent":
+            value_dict['Compound Method'] = enter_compound_method()
     elif entry_type == "cf":
         value_dict[entry[0]] = enter_cashflow()
         disc = "(typically 0)"
         value_dict["Start Year"] = float(input(f'Enter Start Year {disc}: ').strip())
-
-
+    elif entry_type == "comp":
+        value_dict['Compound Method'] = enter_compound_method()
+    elif entry_type in ["sp1", "sp2"]:
+        enter_spot_rates(value_dict, entry_type)
+    elif entry_type == "sp_lst":
+        enter_spot_rates_list(value_dict)
     elif entry_type == "complete":
         return complete_calculation_entry(value_dict)
     elif entry_type == "return":
@@ -98,7 +102,19 @@ def complete_calculation_entry(value_dict) -> (None, str):
         for key, items in closest_calculations:
             key_str = f"Key: {key}"
             print(f'{key_str:<20} | Missing: {items}')
-        input("\nPress Enter to Continue: ")
+
+        x = input("\nPress Enter to Continue or \"0\" for more options: ")
+        if x.strip() == "0":
+            for key, calc in calculation_key.items():
+                calc_obj = calc(value_dict)
+                info_needed = len(calc_obj.requirements)
+                missing = len(calc_obj.missing_values)
+                similarity = (info_needed - missing) / info_needed
+                if similarity > 0:
+                    key_str = f"Key: {key}"
+                    print(f'{key_str:<20} | Missing: {calc_obj.missing_values}')
+            input("\nPress Enter to Continue")
+
 
 
 def enter_compound_method():
@@ -115,9 +131,23 @@ def enter_compound_method():
         return compound_options[int(compound.strip())]
 
 
+def enter_spot_rates(value_dict, entry_type):
+    if entry_type[-1] == "1":
+        value_dict["First Spot Year"] = float(input(f'Enter Lower Spot Year (commas '
+                                           f'allowed): ').strip().replace(",", ""))
+        value = input(f'Enter Spot Value for position 1 (as a Percent): ')
+        if value.strip() != "":
+            value_dict["First Spot Value"] = float(value.strip()) / 100
+    elif entry_type[-1] == "2":
+        value_dict["Second Spot Year"] = float(input(f'Enter Lower Spot Year (commas '
+                                           f'allowed): ').strip().replace(",", ""))
+        value = input(f'Enter Spot Value for position 2 (as a Percent): ')
+        if value.strip() != "":
+            value_dict["Second Spot Value"] = float(value.strip()) / 100
+
+
 def enter_cashflow():
     cashflow = []
-
     if not cashflow:
         i = 0
         entry = input(f"Enter Cashflow #{i}: ")
@@ -125,11 +155,58 @@ def enter_cashflow():
             cashflow.append(float(entry))
             i += 1
             entry = input(f"Enter Cashflow (Q to quit) #{i}: ").strip()
-
     return cashflow
 
 
+def enter_spot_rates_list(value_dict):
+    sp_list = []
+    if not sp_list:
+        i = 1
+        entry = input(f"Enter Spot Rate #{i}: ")
+        while entry.upper() != 'Q':
+            sp_list.append(float(entry) / 100)
+            i += 1
+            entry = input(f"Enter Spot Rate (Q to quit) #{i}: ").strip()
+    value_dict["Spot Rate List"] = sp_list
 
+
+def enter_list(value_dict, entry_type, mode, saved):
+    disc = "(Q to quit)"
+    percent = False
+    optional = False
+    enter_str = ""
+    enter_str_opt = ""
+    i = 1
+
+    if mode == "Cashflow":
+        i = 0
+        enter_str = "Enter Cashflow"
+    elif mode == "Spot Rate List":
+        percent = False
+        enter_str = "Enter Spot Rate"
+    elif mode == "Project (cost/worth)":
+        enter_str = "Enter Project Cost"
+        optional = True
+        enter_str_opt = "Enter Project Worth"
+
+    entry = input(f"{enter_str} #{i}:" ).strip
+    output = []
+    output_opt = []
+    while entry.upper() != 'Q':
+        if percent:
+            output.append(float(entry) / 100)
+        else:
+            output.append(float(entry))
+        if optional:
+            entry_opt = input(f"{enter_str_opt} #{i}:")
+            output_opt.append(float(entry_opt))
+        i += 1
+        entry = input(f"{enter_str} {disc} #{i}:" ).strip()
+
+    if optional:
+        value_dict[mode] = [output, output_opt]
+    else:
+        value_dict[mode] = output
 
 
 

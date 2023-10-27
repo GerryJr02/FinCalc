@@ -25,7 +25,6 @@ class InterestCalculator:
                 calc = calculation_key[chosen_calc](self.value_dict)  # find Calc Class
                 if all(key in self.value_dict for key in calc.requirements):  # double check reqs
                     print('\n' * 40)
-
                     calc.display_values()
                     complete = input('Would you like to calculate? (Y/N): ')
                     if complete.strip().upper() == 'Y' or complete.strip() == '1':
@@ -40,7 +39,6 @@ class InterestCalculator:
                         print(f"{item} Missing")
 
                 next_calc = input('\nWould you like to continue? (Y/N): ')
-
 
 
 if __name__ == '__main__':

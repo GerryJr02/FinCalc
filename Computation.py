@@ -3,6 +3,8 @@
 import math
 import copy
 from scipy.optimize import newton
+import numpy as np
+from pulp import LpMaximize, LpProblem, LpVariable, lpSum
 
 
 values_dict = {
@@ -17,6 +19,10 @@ rates_dict = {
     2: ("Effective Rate", "percent"),
     3: ("Nominal Rate", "percent"),
     4: ("Periods", "commas"),
+    5: ("Compound Method", "comp"),
+    6: ("First Spot Year", "sp1"),
+    7: ("Second Spot Year", "sp2"),
+    8: ("Forward Rate", "percent only"),
     0: ("Return", "return")
 }
 
@@ -30,15 +36,19 @@ loans_dict = {
 bonds_dict = {
     1: ("Face Value", "commas"),
     2: ("Coupons", "commas"),
-    3: ("Yield", "percent"),
+    3: ("Yield", "percent only"),
     4: ("Coupons per Period", "commas"),
     5: ("Periods", "commas"),
     6: ("Bond Price", "commas"),
+    7: ("New Yield", "percent only"),
+    8: ("Spot Rate List", "sp_lst"),
     0: ("Return", "return")
 }
 
 extra_format_storage = {
-    0: ("Compound Method", "commas")  # default is commas
+    0: ("Compound Method", "commas"),  # default is commas
+    1: ("First Spot Value", "percent only"),
+    2: ("Second Spot Value", "percent only")
 }
 
 menu_layout = {
@@ -50,7 +60,7 @@ menu_layout = {
 }
 
 ingredients_catalog = {}
-for dictionary in [values_dict, rates_dict, bonds_dict, extra_format_storage]:
+for dictionary in [values_dict, rates_dict, bonds_dict, loans_dict, extra_format_storage]:
     for tup in dictionary.values():
         if len(tup) == 2:
             ingredients_catalog[tup[0]] = tup[1]
@@ -100,24 +110,25 @@ class OutlineCalculation:
             self.attempt_calc_failed = True
             return
 
-    def display_values(self):
+    def display_values(self, mode="Default"):
         if not self.valid:
             for item in self.missing_values:
                 print(f"Missing data for '{item}'.")
             return
         bold_name = "\033[1m" + f"Calculating {self.title}" + "\033[0m"
-        print(f'{bold_name:~^40}')
+        if mode == "Default":
+            print(f'{bold_name:~^40}')
         for item in self.values:
-            if item in ingredients_catalog and item in self.requirements:
-                if ingredients_catalog[item] == "commas":
-                    print(f'{item}: {format_numeric_value(self.values[item])}')
-                elif ingredients_catalog[item] == "percent":
-                    print(f'{item}: {self.values[item] * 100}%')
-                elif ingredients_catalog[item] == "cf":
-                    print(f'{item}: {self.values[item]}')
+            if item in ingredients_catalog and (item in self.requirements or mode != "Default"):
+                if ingredients_catalog[item] in ("commas", "sp1", "sp2"):
+                    print(f'{item:<20}: {format_numeric_value(self.values[item])}')
+                elif ingredients_catalog[item] in ("percent", "percent only"):
+                    print(f'{item:<20}: {self.values[item] * 100}%')
+                elif ingredients_catalog[item] in ("cf", "sp_lst"):
+                    print(f'{item:<20}: {self.values[item]}')
                 else:
                     print(f'Failed to file-- {item}: {self.values[item]}')
-            elif item in ingredients_catalog:
+            elif item not in self.requirements:
                 pass
             else:
                 print(f"Uncatalogued-- {item}: {self.values[item]}")
@@ -283,19 +294,11 @@ class PerpetualValue(OutlineCalculation):
         return str(self.prp / self.rate) + " in Present Value"
 
 
-    def display_values(self):
-        super().display_values()
-        bold_name = "\033[1m" + "Calculating Perpetual Value in Present Value" + "\033[0m"
-        print(f'{bold_name:~^50}')
-        print(f'Perpetual Value Annually: {format_numeric_value(self.prp)}')
-        print(f'Interest Rate: {self.rate * 100}%')
-
-
-class PrincipalRemaining(OutlineCalculation):
+class PrincipalRemainingPV(OutlineCalculation):
     def __init__(self, values: dict):
         super().__init__(values)
-        self.calc = "Principal Remaining"
-        self.title = "Remaining Principal"
+        self.calc = "Principal Remaining in Present Value"
+        self.title = "Remaining Principal in Present Value"
         self.requirements = ["Payments", "Periods", "Interest Rate", "Compound Method"]
         self.valid = self.validate_values()
         if self.valid:
@@ -309,9 +312,27 @@ class PrincipalRemaining(OutlineCalculation):
         compounding = compounding_methods[self.compound]
         r = self.rate / compounding
         n = compounding * self.periods
-        return (self.pay / r) * (1 - 1 / ((1+r) ** n))
+        return (self.pay / r) * (1 - 1 / (( 1 + r) ** n))
 
-#  principal remaining seems off
+
+class PrincipalRemainingNV(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "Principal Remaining in Nominal Value"
+        self.title = "Remaining Principal in Nominal Value"
+        self.requirements = ["Payments", "Periods", "Compound Method"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.pay = self.values["Payments"]
+            self.periods = self.values["Periods"]
+            self.compound = self.values["Compound Method"]
+
+
+    def calculate(self):
+        super().calculate()
+        compounding = compounding_methods[self.compound]
+        return compounding * self.periods * self.pay
+
 #  add feature to find principal remaining w/o Payments since can be calculated without
 #  separate calc into more modules to clean code
 
@@ -422,11 +443,217 @@ class ModifiedDuration(OutlineCalculation):
 
     def calculate(self):
         super().calculate()
-        P = BondPrice(self.values).calculate()
         D = MacaulayDuration(self.values).calculate()
         answer = (1 / (1 + self.y / self.m)) * D
         return str(answer) + f" or {answer:.2f} payments aka periods left."
 
+
+class ChangeInBondPrice(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "Change In Bond Price"
+        self.title = "Change in Bond Price based on New Yield"
+        self.requirements = ["Face Value", "Coupons", "Coupons per Period", "Yield", "New Yield",
+                             "Periods"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.fv = self.values["Face Value"]
+            self.coup = self.values["Coupons"]  # Called % Coupon Bonds or % Bond
+            self.m = self.values["Coupons per Period"]
+            self.y = self.values["Yield"]  # Yield or Bond Yielding %
+            self.ny = self.values["New Yield"]
+            self.periods = self.values["Periods"]
+
+    def calculate(self):
+        super().calculate()
+        P = BondPrice(self.values).calculate()
+        D_m = (1 / (1 + self.y / self.m)) * MacaulayDuration(self.values).calculate()
+        answer = - P * D_m * (self.ny - self.y)
+        return str(answer) + f" or ${format_numeric_value(answer)} was the amount changed so the" \
+                             f" new Price is:\n${format_numeric_value(answer + P)}"
+
+
+class ForwardRate(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "Forward Rate"
+        self.title = "Forward Rate aka the Predicted Rate for the Second Year"
+        self.requirements = ["First Spot Year", "First Spot Value", "Second Spot Year",
+                             "Second Spot Value", "Compound Method"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.i = self.values["First Spot Year"]
+            self.s_i = self.values["First Spot Value"]
+            self.j = self.values["Second Spot Year"]
+            self.s_j = self.values["Second Spot Value"]
+            self.compound = self.values["Compound Method"]
+
+    def calculate(self):
+        super().calculate()
+        if compounding_methods[self.compound] != "Continuous":
+            m = compounding_methods[self.compound]
+            fract = ((1 + self.s_j / m) ** self.j / (1 + self.s_i / m) ** self.i)
+            answer = m * fract ** (1 / (self.j - self.i)) - m
+        else:
+            answer = (self.s_j * self.j - self.s_i * self.i) / (self.j - self.i)
+        return f"of based on years {self.i}, for year {self.j} it is {answer * 100}%"
+
+
+class FirstSpotRate(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "First Spot Rate"
+        self.title = "Spot Rate aka Theoretical Yield for a Zero-Coup Bond for Second Year"
+        self.requirements = ["First Spot Year", "Forward Rate", "Second Spot Year",
+                             "Second Spot Value", "Compound Method"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.i = self.values["First Spot Year"]
+            self.fr = self.values["Forward Rate"]
+            self.j = self.values["Second Spot Year"]
+            self.s_j = self.values["Second Spot Value"]
+            self.compound = self.values["Compound Method"]
+
+    def calculate(self):
+        super().calculate()
+        if compounding_methods[self.compound] != "Continuous":
+            m = compounding_methods[self.compound]
+            fract_1 = (1 + self.s_j / m) ** self.j
+            fract_2 = (1 + self.fr / m) ** (self.j - self.i)
+            answer = ((fract_1 / fract_2) ** (-self.i) - 1) * m
+        else:
+            answer = -(self.fr * (self.j - self.i) - self.s_j * self.j) / self.i
+        return f"for year {self.j} is {answer} or {answer * 100:.2f}%"
+
+
+class SecondSpotRate(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "Second Spot Rate"
+        self.title = "Forward Rate aka the Predicted Rate for the Second Year"
+        self.requirements = ["First Spot Year", "First Spot Value", "Second Spot Year",
+                             "Forward Rate", "Compound Method"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.i = self.values["First Spot Year"]
+            self.s_i = self.values["First Spot Value"]
+            self.j = self.values["Second Spot Year"]
+            self.fr = self.values["Forward Rate"]
+            self.compound = self.values["Compound Method"]
+
+    def calculate(self):
+        super().calculate()
+        if compounding_methods[self.compound] != "Continuous":
+            m = compounding_methods[self.compound]
+            fract_1 = (1 + self.s_i / m) ** (self.i/self.j)
+            fract_2 = (1 + self.fr / m) ** ((self.j - self.i) / self.j)
+            answer = (fract_1 * fract_2 - 1) * m
+        else:
+            answer = (self.fr * (self.j - self.i) + self.s_i * self.i) / self.j
+        return f"for year {self.i} is {answer} or {answer * 100:.2f}%"
+
+
+class QuasiModifiedDuration(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "Quasi-Modified Duration"
+        self.title = "Quasi-Modified Duration aka Sensitivity"
+        self.requirements = ["Spot Rate List", "Face Value", "Coupons",
+                             "Coupons per Period", "Compound Method", "Periods"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.y_list = self.values["Spot Rate List"]
+            self.fv = self.values["Face Value"]
+            self.coup = self.values["Coupons"]
+            self.compound = self.values["Compound Method"]
+            self.periods = self.values["Periods"]
+
+    def calculate(self):
+        super().calculate()
+        m = compounding_methods[self.compound]
+        n = m * self.periods
+        coup = self.coup / m
+        entry_PV = {"Periods": 0, "Compound Method": self.compound}
+        P_list = []
+        D_list = []
+        i = 1
+        for y in self.y_list:
+            if i > self.periods:
+                break
+            entry_PV["Periods"] = i
+            entry_PV["Interest Rate"] = y
+            if i == self.periods:
+                entry_PV["Future Value"] = self.coup + self.fv
+            else:
+                entry_PV["Future Value"] = self.coup
+            P_list.append(PresentValue(entry_PV).calculate())
+            for j in range(1, m + 1):
+                if i == self.periods and j == m:  # last iteration
+                    coup = coup + self.fv
+                k = (i - 1) * m + j
+                D_list.append(coup * (k / m) * (1 + y / m) ** (-(k + 1)))
+            i += 1
+        return sum(D_list) / sum(P_list)
+
+
+class ImmunizePortfolio(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "Immunize Portfolio"
+        self.title = "Immunization for Portfolio aka Minimize Impact from Change of Yield"
+        self.requirements = ["Spot Rate List", "Face Value #1", "Coupons #1",
+                             "Coupons per Period #1", "Periods #1", "Face Value #2", "Coupons #2",
+                             "Coupons per Period #2", "Periods #2", "Obligations List",
+                             "Compound Method"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.y_list = self.values["Spot Rate List"]
+            self.fv_1 = self.values["Face Value #1"]
+            self.coup_1 = self.values["Coupons #1"]
+            self.m_1 = self.values["Coupons per Period #1"]
+            self.p_1 = self.values["Periods #1"]
+            self.fv_2 = self.values["Face Value #2"]
+            self.coup_2 = self.values["Coupons #2"]
+            self.m_2 = self.values["Coupons per Period #2"]
+            self.p_2 = self.values["Periods #2"]
+            self.obl_list = self.values["Obligations List"]
+            self.compound = self.values["Compound Method"]
+            self.cm1 = self.values["Compound Method"]  # Can be Changed Manually
+            self.cm2 = self.values["Compound Method"]  # Can be Changed Manually
+
+    def calculate(self):
+        super().calculate()
+        def FindPresentValue(fv_1, coup_1, p_1, compound, y_list):
+            entry_P = {"Future Value": coup_1, "Compound Method": compound}
+            P = []
+            for i in range(1, p_1 + 1):
+                entry_P["Periods"] = i
+                if i == self.p_1:
+                    entry_P["Future Value"] = coup_1 + fv_1
+                entry_P["Interest Rate"] = y_list[i - 1]
+                P.append(PresentValue(entry_P).calculate())
+            return sum(P)
+        def FindQuasiDuration(y_list, fv_1, coup_1, m_1, p_1, compound):
+            entry_P = {"Spot Rate List": y_list, "Face Value": fv_1, "Coupons": coup_1,
+                       "Coupons per Period": m_1, "Periods": p_1, "Compound Method":compound}
+            return QuasiModifiedDuration(entry_P).calculate()
+
+        P1 = FindPresentValue(self.fv_1, self.coup_1, self.p_1, self.cm1, self.y_list)
+        P2 = FindPresentValue(self.fv_2, self.coup_2, self.p_2, self.cm2, self.y_list)
+        D_1 = FindQuasiDuration(self.y_list, self.fv_1, self.coup_1, self.m_1, self.p_1, self.cm1)
+        D_2 = FindQuasiDuration(self.y_list, self.fv_2, self.coup_2, self.m_2, self.p_2, self.cm2)
+        PV_list = []
+        for i in range(len(self.obl_list)):
+            PV_list.append(self.obl_list[i] * (i + 1) * (1 + self.y_list[i]) ** (-(i + 1)))
+        PV_ob  = sum(PV_list)
+        Obl_list = []
+        for i in range(len(self.obl_list)):
+            Obl_list.append(self.obl_list[i] * (i + 1) * (1 + self.y_list[i]) ** (-(i + 2)))
+        D_obl = sum(Obl_list) / PV_ob
+
+        A = np.array([[P1, P2], [P1 * D_1, P2 * D_2]])
+        B = np.array([PV_ob, PV_ob * D_obl])
+        return np.linalg.solve(A, B)
 
 
 calculation_key = {
@@ -436,10 +663,23 @@ calculation_key = {
     "Internal Rate": InternalRate,
     "Nominal Rate": NominalRate,
     "Payments for Loan": PaymentLoan,
-    "Principal Remaining": PrincipalRemaining,
+    "Principal Remaining in Present Value": PrincipalRemainingPV,
+    "Principal Remaining in Nominal Value": PrincipalRemainingNV,
     "Perpetual Value": PerpetualValue,
     "Bond Price": BondPrice,   # Slightly off by .3%                    P and lamda should be switchable
     "Macaulay Duration": MacaulayDuration,   # Slightly off by 1%
     "Modified Duration": ModifiedDuration,
-    "Yield To Maturity": YieldToMaturity
+    "Yield To Maturity": YieldToMaturity,
+    "Forward Rate": ForwardRate,
+    "First Spot Rate": FirstSpotRate,
+    "Second Spot Rate": SecondSpotRate,
+    "Change In Bond Price": ChangeInBondPrice,
+    "Quasi-Modified Duration": QuasiModifiedDuration
 }
+
+# create a discount factor
+# error in 34:40 lec 6
+# be able to enter a list of spot rates to find expected for next year (f1,2  f1,3  f1,4 )
+# how to do payments given difference interest
+# change in price, change for all relevant possibilities
+# check normal duration calculation
