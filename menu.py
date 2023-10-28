@@ -50,7 +50,7 @@ def enter_value(value_dict) -> (None, str):
         if entry_type == "percent":
             value_dict['Compound Method'] = enter_compound_method()
     elif entry_type == "cf":
-        value_dict[entry[0]] = enter_cashflow()
+        enter_list(value_dict, "Cashflow")
         disc = "(typically 0)"
         value_dict["Start Year"] = float(input(f'Enter Start Year {disc}: ').strip())
     elif entry_type == "comp":
@@ -58,7 +58,11 @@ def enter_value(value_dict) -> (None, str):
     elif entry_type in ["sp1", "sp2"]:
         enter_spot_rates(value_dict, entry_type)
     elif entry_type == "sp_lst":
-        enter_spot_rates_list(value_dict)
+        enter_list(value_dict, "Spot Rate List")
+    elif entry_type == "prj_list":
+        enter_list(value_dict, "Project (cost/worth)")
+    elif entry_type == "by_lst":
+        enter_list(value_dict, "Bond Yield List")
     elif entry_type == "complete":
         return complete_calculation_entry(value_dict)
     elif entry_type == "return":
@@ -146,31 +150,7 @@ def enter_spot_rates(value_dict, entry_type):
             value_dict["Second Spot Value"] = float(value.strip()) / 100
 
 
-def enter_cashflow():
-    cashflow = []
-    if not cashflow:
-        i = 0
-        entry = input(f"Enter Cashflow #{i}: ")
-        while entry.upper() != 'Q':
-            cashflow.append(float(entry))
-            i += 1
-            entry = input(f"Enter Cashflow (Q to quit) #{i}: ").strip()
-    return cashflow
-
-
-def enter_spot_rates_list(value_dict):
-    sp_list = []
-    if not sp_list:
-        i = 1
-        entry = input(f"Enter Spot Rate #{i}: ")
-        while entry.upper() != 'Q':
-            sp_list.append(float(entry) / 100)
-            i += 1
-            entry = input(f"Enter Spot Rate (Q to quit) #{i}: ").strip()
-    value_dict["Spot Rate List"] = sp_list
-
-
-def enter_list(value_dict, entry_type, mode, saved):
+def enter_list(value_dict, mode):
     disc = "(Q to quit)"
     percent = False
     optional = False
@@ -188,20 +168,26 @@ def enter_list(value_dict, entry_type, mode, saved):
         enter_str = "Enter Project Cost"
         optional = True
         enter_str_opt = "Enter Project Worth"
+    elif mode == "Bond Yield List":
+        enter_str = "Enter Bond Yield (Percent)"
+        percent = True
 
-    entry = input(f"{enter_str} #{i}:" ).strip
+    entry = input(f"{enter_str} #{i}: ").strip()
     output = []
     output_opt = []
+    print("I got", entry)
     while entry.upper() != 'Q':
+        print("I entered")
         if percent:
             output.append(float(entry) / 100)
         else:
             output.append(float(entry))
+            print("added to list")
         if optional:
-            entry_opt = input(f"{enter_str_opt} #{i}:")
+            entry_opt = input(f"{enter_str_opt} #{i}: ")
             output_opt.append(float(entry_opt))
         i += 1
-        entry = input(f"{enter_str} {disc} #{i}:" ).strip()
+        entry = input(f"{enter_str} {disc} #{i}: ").strip()
 
     if optional:
         value_dict[mode] = [output, output_opt]

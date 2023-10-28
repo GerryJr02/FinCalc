@@ -5,6 +5,7 @@ import copy
 from scipy.optimize import newton
 import numpy as np
 from pulp import LpMaximize, LpProblem, LpVariable, lpSum
+from scipy.optimize import linprog
 
 
 values_dict = {
@@ -51,16 +52,25 @@ extra_format_storage = {
     2: ("Second Spot Value", "percent only")
 }
 
+optimal_dict = {
+    1: ("Project (cost/worth)", "prj_list"),
+    2: ("Budget", "commas"),
+    3: ("Bond Yield List", "by_lst"),
+    0: ("Return", "return")
+}
+
 menu_layout = {
     1: ("Value", values_dict),  # Present Value, Future Value, Cashflow
     2: ("Rate", rates_dict),   # Interest Rate, Effective Rate, Nominal Rate
     3: ("Loan", loans_dict),
     4: ("Bond", bonds_dict),
+    5: ("Optimal", optimal_dict),
     0: "Complete"
 }
 
 ingredients_catalog = {}
-for dictionary in [values_dict, rates_dict, bonds_dict, loans_dict, extra_format_storage]:
+for dictionary in [values_dict, rates_dict, bonds_dict, loans_dict, optimal_dict,
+                   extra_format_storage]:
     for tup in dictionary.values():
         if len(tup) == 2:
             ingredients_catalog[tup[0]] = tup[1]
@@ -124,7 +134,7 @@ class OutlineCalculation:
                     print(f'{item:<20}: {format_numeric_value(self.values[item])}')
                 elif ingredients_catalog[item] in ("percent", "percent only"):
                     print(f'{item:<20}: {self.values[item] * 100}%')
-                elif ingredients_catalog[item] in ("cf", "sp_lst"):
+                elif ingredients_catalog[item] in ("cf", "sp_lst", "prj_list", "by_lst"):
                     print(f'{item:<20}: {self.values[item]}')
                 else:
                     print(f'Failed to file-- {item}: {self.values[item]}')
@@ -553,10 +563,10 @@ class SecondSpotRate(OutlineCalculation):
         return f"for year {self.i} is {answer} or {answer * 100:.2f}%"
 
 
-class QuasiModifiedDuration(OutlineCalculation):
+class QuasiModifiedDurationBond(OutlineCalculation):
     def __init__(self, values: dict):
         super().__init__(values)
-        self.calc = "Quasi-Modified Duration"
+        self.calc = "Quasi-Modified Duration from Bond"
         self.title = "Quasi-Modified Duration aka Sensitivity"
         self.requirements = ["Spot Rate List", "Face Value", "Coupons",
                              "Coupons per Period", "Compound Method", "Periods"]
@@ -623,38 +633,95 @@ class ImmunizePortfolio(OutlineCalculation):
 
     def calculate(self):
         super().calculate()
-        def FindPresentValue(fv_1, coup_1, p_1, compound, y_list):
-            entry_P = {"Future Value": coup_1, "Compound Method": compound}
+        def FindPresentValue(fv, coup, periods, compound, y_list):
+            entry_P = {"Future Value": coup, "Compound Method": compound}
             P = []
-            for i in range(1, p_1 + 1):
+            for i in range(1, periods + 1):
                 entry_P["Periods"] = i
-                if i == self.p_1:
-                    entry_P["Future Value"] = coup_1 + fv_1
+                if i == periods:
+                    entry_P["Future Value"] = coup + fv
                 entry_P["Interest Rate"] = y_list[i - 1]
                 P.append(PresentValue(entry_P).calculate())
             return sum(P)
         def FindQuasiDuration(y_list, fv_1, coup_1, m_1, p_1, compound):
             entry_P = {"Spot Rate List": y_list, "Face Value": fv_1, "Coupons": coup_1,
                        "Coupons per Period": m_1, "Periods": p_1, "Compound Method":compound}
-            return QuasiModifiedDuration(entry_P).calculate()
-
+            return QuasiModifiedDurationBond(entry_P).calculate()
+        m = compounding_methods[self.compound]
         P1 = FindPresentValue(self.fv_1, self.coup_1, self.p_1, self.cm1, self.y_list)
-        P2 = FindPresentValue(self.fv_2, self.coup_2, self.p_2, self.cm2, self.y_list)
+        P2 = FindPresentValue(self.fv_2, self.coup_2, self.p_2, self.cm2, self.y_list) # * 2.048960
         D_1 = FindQuasiDuration(self.y_list, self.fv_1, self.coup_1, self.m_1, self.p_1, self.cm1)
         D_2 = FindQuasiDuration(self.y_list, self.fv_2, self.coup_2, self.m_2, self.p_2, self.cm2)
         PV_list = []
         for i in range(len(self.obl_list)):
-            PV_list.append(self.obl_list[i] * (i + 1) * (1 + self.y_list[i]) ** (-(i + 1)))
+            PV_list.append(PresentValue({"Future Value": self.obl_list[i], "Interest Rate":
+                self.y_list[i], "Periods": i + 1, "Compound Method": self.compound}).calculate())
         PV_ob  = sum(PV_list)
         Obl_list = []
         for i in range(len(self.obl_list)):
-            Obl_list.append(self.obl_list[i] * (i + 1) * (1 + self.y_list[i]) ** (-(i + 2)))
+            for j in range(1, m + 1):
+                k = i * m + j
+                Obl_list.append(self.obl_list[i] * (k / m) * (1 + self.y_list[i] / m) ** (-(k + 1)))
         D_obl = sum(Obl_list) / PV_ob
-
         A = np.array([[P1, P2], [P1 * D_1, P2 * D_2]])
         B = np.array([PV_ob, PV_ob * D_obl])
         return np.linalg.solve(A, B)
 
+
+class OptimalProject(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "Optimal Projects"
+        self.title = "Optimal number of Projects to Do"
+        self.requirements = ["Project (cost/worth)", "Budget"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.costs_tup = self.values["Project (cost/worth)"][0]
+            self.worth_tup = self.values["Project (cost/worth)"][1]
+            self.max = self.values["Budget"]
+
+    def calculate(self):
+        super().calculate()
+        prob = LpProblem("Maximize_Value", LpMaximize)
+        n = len(self.costs_tup)
+        x = [LpVariable(f"x{i}", cat = "Binary") for i in range(n)]
+        prob += lpSum(self.worth_tup[i] * x[i] for i in range(n)), "Total_Value"
+        prob += lpSum(self.costs_tup[i] * x[i] for i in range(n)) <= self.max, "Budget_Constraint"
+        prob.solve()
+        selected_projects = [i + 1 for i in range(n) if x[i].varValue == 1]
+        total_value = sum(self.worth_tup[i] for i in selected_projects)
+        return f"/ are {selected_projects} with a max value of {total_value}"
+
+
+class OptimizeParBonds(OutlineCalculation):
+    def __init__(self, values: dict):
+        super().__init__(values)
+        self.calc = "Optimize Par-Bonds"
+        self.title = "Optimize Par-Bonds against Obligations"
+        self.requirements = ["Obligations List", "Periods", "Bond Yield List", "Face Value"]
+        self.valid = self.validate_values()
+        if self.valid:
+            self.obl_list = self.values["Obligations List"]
+            self.bond_y_list = self.values["Bond Yield List"]
+            self.fv = self.values["Face Value"]
+            self.periods = self.values["Periods"]
+
+    def calculate(self):
+        super().calculate()
+        c = np.full(self.periods, self.fv)
+        A = np.zeros((self.periods, self.periods))
+        for i in range(self.periods):
+            for j in range(i, self.periods):
+                if i == j:
+                    A[i, j] = self.fv + self.bond_y_list[j] * self.fv  # redemption value + coupon payment
+                else:
+                    A[i, j] = self.bond_y_list[j] * self.fv # coupon payment
+        b = np.array(self.obl_list)
+        result = linprog(c, A_ub = -A, b_ub = -b, method = "highs")
+        answer = []
+        for i, x in enumerate(result.x, 1):
+            answer.append(f"Bond {i} ({self.bond_y_list[i - 1]}% annual coupon): {x:.2f} units")
+        return '\n'.join(answer)
 
 calculation_key = {
     "Future Value": FutureValue,
@@ -674,7 +741,10 @@ calculation_key = {
     "First Spot Rate": FirstSpotRate,
     "Second Spot Rate": SecondSpotRate,
     "Change In Bond Price": ChangeInBondPrice,
-    "Quasi-Modified Duration": QuasiModifiedDuration
+    "Quasi-Modified Duration from Bond": QuasiModifiedDurationBond,
+    "Optimal Project": OptimalProject,
+    "Optimize Par-Bonds": OptimizeParBonds,
+    "Immunize Portfolio": ImmunizePortfolio
 }
 
 # create a discount factor
@@ -683,3 +753,41 @@ calculation_key = {
 # how to do payments given difference interest
 # change in price, change for all relevant possibilities
 # check normal duration calculation
+# create coupon %
+# allow it to be added with face value after assumption of FV 100
+
+if __name__ == "__main__":
+    data = {
+        "Budget": 500.0,
+        "Project (cost/worth)": [[100.0, 20.0, 150.0, 50.0, 50.0, 150.0, 150.0],
+                                 [300.0, 50.0, 350.0, 110.0, 100.0, 250.0, 200.0]]
+    }
+    print(OptimalProject(data).calculate())
+
+
+
+    data = {
+        "Spot Rate List": [.0767, .0827, .0881, .0931, .0975, .1016, .1052, .1085, .1115, .1142,
+                           .1167, .1189],
+        "Face Value #1": 100,
+        "Coupons #1": 6,
+        "Coupons per Period #1": 1,
+        "Periods #1": 12,
+        "Face Value #2": 100,
+        "Coupons #2": 10,
+        "Coupons per Period #2": 1,
+        "Periods #2": 5,
+        "Compound Method": "Annual",
+        "Obligations List": [100, 200, 300, 400, 500, 600, 700, 800]
+    }
+    print(ImmunizePortfolio(data).calculate())
+
+
+
+    data = {
+        "Obligations List": [150, 250, 400, 550, 700, 850, 1000, 1200],
+        "Bond Yield List": [.005, .01, .015, .02, .025, .03, .035, .04],
+        "Periods": 8,
+        "Face Value": 100
+    }
+    print(OptimizeParBonds(data).calculate())
