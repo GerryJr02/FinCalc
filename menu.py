@@ -50,7 +50,10 @@ def enter_value(value_dict) -> (None, str):
         if entry_type == "percent":
             value_dict['Compound Method'] = enter_compound_method()
     elif entry_type == "cf":
-        enter_list(value_dict, "Cashflow")
+        if custom_cf():
+            value_dict['Cashflow'] = custom_cf()
+        else:
+            enter_list(value_dict, "Cashflow")
         disc = "(typically 0)"
         value_dict["Start Year"] = float(input(f'Enter Start Year {disc}: ').strip())
     elif entry_type == "comp":
@@ -71,6 +74,7 @@ def enter_value(value_dict) -> (None, str):
 
 def complete_calculation_entry(value_dict) -> (None, str):
     print('\n' * 40)
+    more_info = False
     valid_calculations = []
     for key, calc in calculation_key.items():
         if calc(value_dict).valid:
@@ -81,13 +85,13 @@ def complete_calculation_entry(value_dict) -> (None, str):
         for item in valid_calculations:
             print(f'{i}: {item}')
             i += 1
-        print(f'0: Return')
+        print(f'0: More Options')
         calc_selected = int(input('\nWhich calculation would you like?: '))
         if calc_selected:
             return valid_calculations[calc_selected - 1]
         else:
-            return
-    else:
+            more_info = True
+    if more_info == True or not valid_calculations:
         closest_calculations = []
         max_similarity = -1
         for key, calc in calculation_key.items():
@@ -95,7 +99,8 @@ def complete_calculation_entry(value_dict) -> (None, str):
             info_needed = len(calc_obj.requirements)
             missing = len(calc_obj.missing_values)
             similarity = (info_needed - missing) / info_needed
-
+            if similarity >= 1:
+                similarity = 0
             if similarity > max_similarity:
                 max_similarity = similarity
                 closest_calculations = [(key, calc_obj.missing_values)]
@@ -105,10 +110,13 @@ def complete_calculation_entry(value_dict) -> (None, str):
         print("\nHere are my suggestion(s):")
         for key, items in closest_calculations:
             key_str = f"Key: {key}"
-            print(f'{key_str:<20} | Missing: {items}')
+            print(f'{key_str:<30} | Missing: {items}')
+        print('~~~Enter "clear" to clear data saved~~~~')
 
         x = input("\nPress Enter to Continue or \"0\" for more options: ")
-        if x.strip() == "0":
+        if x.strip() == "0" and valid_calculations:
+            print('\n' * 40)
+            print(f"\nHere are more Suggestions:")
             for key, calc in calculation_key.items():
                 calc_obj = calc(value_dict)
                 info_needed = len(calc_obj.requirements)
@@ -116,8 +124,19 @@ def complete_calculation_entry(value_dict) -> (None, str):
                 similarity = (info_needed - missing) / info_needed
                 if similarity > 0:
                     key_str = f"Key: {key}"
-                    print(f'{key_str:<20} | Missing: {calc_obj.missing_values}')
-            input("\nPress Enter to Continue")
+                    print(f'{key_str:<30} | Missing: {calc_obj.missing_values}')
+            x = input("\nPress Enter to Continue or \"0\" for ALL options: ")
+            if x.strip() == "0":
+                print('\n' * 40)
+                for key, calc in calculation_key.items():
+                    calc_obj = calc(value_dict)
+                    key_str = f"Key: {key}"
+                    key_str = f"Key: {key}"
+                    print(f'{key_str:<30} | Missing: {calc_obj.missing_values}')
+                x = input("\nPress Enter to Continue: ")
+        elif x.strip().upper() == "CLEAR":
+            value_dict.clear()
+
 
 
 
@@ -175,14 +194,11 @@ def enter_list(value_dict, mode):
     entry = input(f"{enter_str} #{i}: ").strip()
     output = []
     output_opt = []
-    print("I got", entry)
     while entry.upper() != 'Q':
-        print("I entered")
         if percent:
             output.append(float(entry) / 100)
         else:
             output.append(float(entry))
-            print("added to list")
         if optional:
             entry_opt = input(f"{enter_str_opt} #{i}: ")
             output_opt.append(float(entry_opt))
@@ -193,6 +209,16 @@ def enter_list(value_dict, mode):
         value_dict[mode] = [output, output_opt]
     else:
         value_dict[mode] = output
+
+
+def custom_cf():
+    power = True
+    if not power:
+        return False
+    else: # 603725
+        answer =  [0,  24000.0, 26400.0, 29040.0, 31944.0, 35138.0,
+                   38652.0, 42517.0, 46769.0, 51446.0, 1056591.0] ## Enter Here
+        return answer
 
 
 

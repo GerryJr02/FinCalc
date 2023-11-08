@@ -6,13 +6,14 @@ from menu import enter_value
 class InterestCalculator:
     def __init__(self):
         self.value_dict = {}
+        self.safe = True
+        self.custom = False
         memory = []
 
     def run(self):
         next_calc = 'Y'
         while next_calc.strip().upper() != 'N' or next_calc.strip() != '0':
-            on = True
-            if on:
+            if self.safe:
                 try:
                     chosen_calc = enter_value(self.value_dict)
                 except Exception as e:
