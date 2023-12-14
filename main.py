@@ -1,7 +1,9 @@
 # Discussion 1
-from Computation import *
 from menu import enter_value
+from deterministic_calc import determ_key
 
+calculation_key = {}
+calculation_key.update(determ_key)
 
 class InterestCalculator:
     def __init__(self):

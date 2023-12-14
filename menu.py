@@ -1,4 +1,9 @@
-from Computation import menu_layout, calculation_key, OutlineCalculation
+from calc_manager import menu_layout, OutlineCalculation
+from deterministic_calc import determ_key
+
+
+calculation_key = {}
+calculation_key.update(determ_key)
 
 
 def format_val(value):
